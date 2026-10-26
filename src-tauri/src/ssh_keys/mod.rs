@@ -264,6 +264,7 @@ mod tests {
 
     #[test]
     fn generate_with_passphrase_writes_encrypted_key() {
+        keyvault::use_mock_store();
         let tmp = fresh_dir();
         let keystore = keystore_dir(tmp.path()).expect("keystore dir");
         let key = generate(&keystore, "k", SshKeyAlgorithm::Ed25519, Some("secret"))
@@ -282,9 +283,6 @@ mod tests {
             good.is_ok(),
             "decryption with right passphrase should succeed"
         );
-
-        // Cleanup the keychain entry so we don't leak across test runs.
-        let _ = keyvault::delete_secret(&passphrase_account(&key.id));
     }
 
     #[test]

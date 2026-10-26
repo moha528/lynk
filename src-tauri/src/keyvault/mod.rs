@@ -42,3 +42,15 @@ pub fn delete_secret(account: &str) -> Result<bool> {
         Err(e) => Err(anyhow::Error::new(e).context(format!("delete secret for {account}"))),
     }
 }
+
+/// Route every keychain call of the test binary to keyring's in-memory mock
+/// store. Tests then never write to the developer's real keychain, and they
+/// run on machines without one (GitHub's Ubuntu runners have no Secret
+/// Service). Must be called before the test creates its first entry.
+#[cfg(test)]
+pub(crate) fn use_mock_store() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+    });
+}
