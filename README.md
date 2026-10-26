@@ -70,7 +70,7 @@ User documentation (in French) is in [`docs/`](./docs/): getting started, SSH co
 ## Status
 
 - Version 1.0.5, released on 26 May 2026, with installers for the three platforms built by GitHub Actions.
-- 71 backend tests (unit and SQLite tests), of which 2 SSH integration tests are ignored by default. Continuous integration runs Clippy with warnings as errors and the test suite on Ubuntu, macOS and Windows, plus lint and build of the frontend.
+- 98 backend tests (unit and SQLite tests), of which 2 SSH integration tests are ignored by default. Continuous integration runs Clippy with warnings as errors and the test suite on Ubuntu, macOS and Windows, plus lint and build of the frontend.
 - Known limitations: the remote-wins strategy can discard concurrent edits made on two machines before either has pushed; installers are unsigned; the PIN does not encrypt local data.
 
 ## License
