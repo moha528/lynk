@@ -1,121 +1,47 @@
-<p align="center">
-  <img src="public/logo-mark.png" alt="Lynk Client" width="120" />
-</p>
-
 # Lynk Client
 
-**Client SSH/SFTP desktop libre — local-first, chiffré, sans cloud.**
+## Overview
 
-Terminal multi-onglets, SFTP, snippets, identities, port forwarding… et une
-sync chiffrée qui passe par **ton propre dépôt Git**. Pas de compte, pas
-d'abonnement, pas de télémétrie : tes serveurs, tes clés et tes notes ne
-quittent jamais ton contrôle.
+Lynk Client is a desktop SSH and SFTP client for Windows, macOS and Linux, built with Tauri 2, React and Rust. It is local-first: there is no account, no server and no telemetry. Configuration can be synchronised between machines through a Git repository chosen by the user, encrypted on the client before it leaves the machine.
 
-Construit avec [Tauri 2](https://tauri.app), React 19 et Rust.
+## Problem
 
-<!-- TODO(launch): GIF de démo ici (connexion → terminal → sync) -->
+SSH clients that synchronise hosts across machines usually do so through the vendor's cloud account, which means trusting a third party with server addresses, usernames and sometimes credentials. Lynk explores the alternative: everything stays on the machine, secrets stay in the operating system's keychain, and the only synchronised artefact is an encrypted file stored in a repository the user controls.
 
-## L'idée
+## Approach / Architecture
 
-Un client SSH moderne ne devrait pas t'obliger à confier tes accès à un
-service tiers pour les retrouver sur tes autres machines.
+The application has two layers that communicate over Tauri IPC (commands and events):
 
-- 🔒 **Local-first** — tout reste sur ta machine. Mots de passe et passphrases
-  dans le keychain de l'OS ; vault chiffré Argon2id + AES-256-GCM.
-- 🔁 **Une sync que tu possèdes** — le vault chiffré est poussé dans **ton**
-  repo Git privé (GitHub, GitLab, Gitea, self-hosted). Auto-push après chaque
-  modif, pull au démarrage. Le contenu est illisible sans ta clé — y compris
-  pour l'hébergeur du repo.
-- 🆓 **Gratuit et ouvert** — les fonctions essentielles ne sont pas derrière un
-  paywall.
-- 🚫 **Zéro télémétrie** — rien ne quitte la machine sans que tu le décides.
+- **Frontend (webview):** React 19 and TypeScript, terminal rendering with xterm.js, state in Zustand. Sidebar of hosts, groups and tags; tabs with recursive split panes; dual-pane SFTP view; transfer queue; command palette; settings.
+- **Backend (Rust):** session manager and SSH client on `russh`, SFTP on `russh-sftp` with cancellable streamed transfers, local terminal on `portable-pty`, persistence in SQLite through `sqlx` with versioned migrations, secrets through the `keyring` crate, an OpenSSH `~/.ssh/config` parser, encrypted export and Git synchronisation.
 
-## Télécharger
+### Security model
 
-Installeurs pour Windows, macOS (Intel + Apple Silicon) et Linux sur la
-[**page des releases**](https://github.com/moha528/lynk/releases/latest).
+- **Host key verification.** On first connection the server key fingerprint is recorded (trust on first use). On later connections a different fingerprint aborts the SSH handshake and the user is shown the expected and actual fingerprints. Known hosts can be reviewed and forgotten individually.
+- **Secrets.** Passwords, key passphrases and the synchronisation token are stored in the operating system's keychain (Windows Credential Manager, macOS Keychain, Secret Service on Linux), never in the SQLite database or in the synchronised repository.
+- **Encrypted export and synchronisation.** Hosts, groups, tags, identities, snippets and port forwards are serialised to JSON and encrypted with AES-256-GCM. The key is derived from a user password with Argon2id (m = 19 MiB, t = 2, p = 1), with a fresh 16-byte salt and 12-byte nonce for every export. Private keys, known-host fingerprints, command history, appearance settings and passwords are never exported.
+- **Git synchronisation.** The encrypted file (`vault.enc`) is pushed to a private repository 30 seconds after the last change and pulled at start-up, with a remote-wins strategy. Authentication uses an HTTPS token or the system SSH configuration.
+- **Application lock.** An optional numeric PIN, hashed with Argon2id, locks the interface; automatic lock after inactivity closes open sessions and port forwards. The PIN is an application-level lock; it does not encrypt data on disk.
+- **Updates.** The Tauri updater verifies a minisign signature before installing an update.
 
-> Les installeurs ne sont pas encore signés (certificats payants) : ton OS
-> peut afficher un avertissement à l'installation. Deux clics pour le
-> contourner — voir la [FAQ](./docs/faq.md#avertissements-dinstallation).
+### Features
 
-## Fonctionnalités
+- SSH with password, keys or agent; key generation (Ed25519, RSA 4096) and import (OpenSSH, PEM); several keys per host with priority; reusable identities.
+- Multi-hop ProxyJump with cycle detection; local, remote and dynamic (SOCKS5) port forwarding; agent forwarding (Unix socket or Windows OpenSSH agent pipe).
+- Terminal tabs with recursive split panes, broadcast input across panes, search in the buffer, configurable shortcuts.
+- SFTP: browse, create, rename, delete, upload and download with progress; drag and drop between local and remote panes; editing a remote file in the default local editor, with automatic re-upload on save.
+- Snippets with variables, cross-session command history, pre- and post-connect scripts, import of `~/.ssh/config`.
+- Optional per-host recording of terminal output to local log files.
 
-**Phase 1 — Fondations & SSH** ✅
-- Gestion CRUD des serveurs (label, hostname, port, username, group, recherche)
-- Connexion SSH par mot de passe via `russh`, fingerprints TOFU strict
-- PTY interactif rendu via xterm.js, onglets multi-sessions avec resize automatique
-- Reconnexion sans perdre l'onglet
-- Thèmes terminal : Catppuccin Mocha/Latte, Dracula, Solarized Dark/Light, Tokyo Night, Gruvbox Dark
-- Persistance des préférences UI (sidebar width, thème, dernier onglet actif)
+## Tech stack
 
-**Phase 2 — Multi-tabs & SFTP** ✅
-- Groupes : sidebar arborescente pliable, DnD host → groupe, context menu (rename/delete)
-- Tags : multi-tag par host, TagPicker avec création à la volée, badges colorés dans la liste
-- Filtre par tag : pills cliquables au-dessus de la liste avec sémantique OR
-- Parser `~/.ssh/config` + assistant d'import
-- SFTP complet : list/stat/mkdir/remove/rename/upload/download streamés, transferts cancellables
-- Vue dual-pane Local | Remote, drag & drop bidirectionnel, multi-sélection
-- File de transferts globale avec progression, vitesse, ETA, cancel
-- Édition fichier remote dans l'éditeur OS par défaut avec re-upload auto (watch mtime)
-- Split panes terminal récursifs (style tmux) avec resize au drag
-- Renommer un onglet par double-clic
-- Sessions persistantes au démarrage avec dialog Restore
+Rust (Tauri 2, russh, russh-sftp, sqlx with SQLite, keyring, argon2, aes-gcm, portable-pty) · TypeScript (React 19, xterm.js, Zustand) · Vite · Biome · GitHub Actions.
 
-**Extras hors-roadmap** ✅
-- Terminal local : onglet « Local » qui spawn un shell sur la machine via `portable-pty`
-- Custom window chrome (Mica sur Win 11, caption color fallback Win 10)
-- Keychain OS pour mémoriser les mots de passe (anticipe P3-T06)
-- Command palette globale (Ctrl+K) avec fuzzy search sur hosts + actions
-- Workspace homepage (grille de hosts) quand pas d'onglet ouvert
-- Toasts globaux (sonner) sur toutes les actions backend
-- Thèmes app et terminal indépendants
+## How to run
 
-**Phase 3 — Sécurité & SSH avancé** ✅
-- Clés SSH ed25519 / RSA 4096 : génération, import OpenSSH/PEM, association multi-clés par host avec priorité
-- PIN d'accès (Argon2id) + auto-lock après inactivité (5/15/30/60 min) — ferme sessions ET port forwards
-- UI known_hosts (TOFU) avec oubli individuel
-- ProxyJump multi-niveau (détection de cycles)
-- Port forwarding `-L` / `-R` / `-D` SOCKS5 avec UI dédiée
-- Agent forwarding (Unix socket / Windows OpenSSH-Agent named pipe)
-- Audit log local par host
+Installers for Windows, macOS (Intel and Apple Silicon) and Linux are on the [releases page](https://github.com/moha528/lynk/releases/latest). They are not code-signed yet, so the operating system may show a warning at installation; see the [FAQ](./docs/faq.md).
 
-**Phase 4 — UX power user** ✅
-- Snippets : commandes réutilisables avec variables `{{host}}` / `{{user}}` / `{{date}}` / custom, panneau latéral `Ctrl+Shift+S`, modal de saisie
-- Historique de commandes inter-sessions (Ctrl+R), capture per-session, scope host ou global
-- Raccourcis clavier configurables avec recorder live et détection de conflits
-- Broadcast input multi-pane sur splits avec indicateur visuel
-- Identities SSH (username + agent + clés réutilisables) partagés entre hosts
-- Pré/post connect scripts (local shell avant SSH, lignes envoyées au PTY après ouverture)
-- URLs cliquables (Ctrl+clic → navigateur via tauri-plugin-opener)
-- Recherche dans le buffer (`Ctrl+Shift+F`, case-sensitive + regex)
-- Notifications système sur terminal bell `\a`
-- Palette `Ctrl+K` étendue : actions Snippets / Historique
-
-**Phase 5 — Sync & release** ✅ (release v1.0.0 = étape manuelle, cf. [docs/RELEASING.md](./docs/RELEASING.md))
-- Export chiffré du vault (`.tmv` AES-256-GCM, clé dérivée Argon2id) → hosts/groupes/tags/identities/snippets/forwards
-- Import avec deux modes : merge (ajoute sans destruction) ou replace (wipe + re-insert)
-- Sync Git : auto-push debouncé 30 s du `vault.enc` chiffré dans un repo Git privé que tu contrôles, pull au démarrage avec remote-wins, auth `https-pat` ou `ssh`
-- Indicateur de sync dans le Header (pill verte/orange/rouge)
-- Updater Tauri (check silencieux au démarrage + toast, vérif de signature minisign)
-- Workflow GitHub Actions de packaging multi-OS (msi/nsis · dmg universal · deb/AppImage)
-- Page About (version, liens, check manuel) + opt-in crash reporting
-- Documentation utilisateur dans [`docs/`](./docs/)
-
-À venir (voir [cahier des charges](./CAHIER_DES_CHARGES.md)) :
-- **Phase 6 — Launch** : landing page, docs en ligne, GitHub Sponsors. Léger, post-v1.0.
-- **Phase 7 — Monétisation** *(conditionnelle)* : tier Pro managé, team sync, SSO.
-  Débloquée **uniquement si la demande le justifie** — le cœur reste gratuit et ouvert.
-
-## Construire depuis les sources
-
-Pour contribuer ou builder toi-même :
-
-**Prérequis** — Node.js ≥ 20, pnpm ≥ 9, Rust stable ([rustup](https://www.rust-lang.org/learn/get-started)),
-et les [dépendances système Tauri](https://tauri.app/start/prerequisites/) de ton OS :
-- macOS : Xcode CLT
-- Linux : `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`, `libssl-dev`
-- Windows : Visual Studio Build Tools (workload C++ + Windows SDK)
+To build from source you need Node.js 20 or later, pnpm 9 or later, stable Rust and the [Tauri system dependencies](https://tauri.app/start/prerequisites/) for your platform.
 
 ```bash
 git clone https://github.com/moha528/lynk.git
@@ -124,74 +50,29 @@ pnpm install
 pnpm tauri dev
 ```
 
-La première compilation Rust prend quelques minutes ; les suivantes sont mises en cache.
-
-## Scripts utiles
-
-| Commande              | Description                                                |
-| --------------------- | ---------------------------------------------------------- |
-| `pnpm dev`            | Lance Vite seul (sans la fenêtre Tauri)                    |
-| `pnpm tauri dev`      | Lance l'app desktop en dev                                 |
-| `pnpm build`          | Build front (typecheck + Vite build)                       |
-| `pnpm lint`           | Vérifie le code front avec Biome                           |
-| `pnpm lint:fix`       | Applique les fixes Biome auto                              |
-| `cargo test`          | Tests backend (depuis `src-tauri/`)                        |
-| `cargo clippy`        | Lint Rust strict (depuis `src-tauri/`)                     |
-| `cargo fmt --all`     | Formate le code Rust (depuis `src-tauri/`)                 |
-
-## Architecture (overview)
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                     Frontend React (Webview)                     │
-│  Sidebar  │  TabsBar + SessionPane (xterm.js / SftpView / split) │
-│           │  CommandPalette • Workspace • SettingsView           │
-│           │  ConnectDialog • ImportSshConfigDialog • Transfers   │
-└────────────────────────────┬─────────────────────────────────────┘
-                             │ Tauri IPC : invoke + events + Toasts
-┌────────────────────────────▼─────────────────────────────────────┐
-│                         Backend Rust                              │
-│  SessionManager   │  Store (sqlx + SQLite)                       │
-│  ssh::Session     │    hosts, known_hosts, settings              │
-│  ssh::PtyChannel  │  KeyVault (keyring crate, OS native)         │
-│  sftp::SftpClient │  TransferRegistry (cancellable transfers)    │
-│  edit::EditReg.   │  import::ssh_config (OpenSSH parser)         │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-Voir [`CONTRIBUTING.md`](./CONTRIBUTING.md) pour le détail de la structure des dossiers.
-
-## Tests
+Tests and lint:
 
 ```bash
-# Tests backend (unitaires + tests DB)
 cd src-tauri && cargo test
+cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
+pnpm lint
+```
 
-# Tests d'intégration SSH (ignored par défaut — nécessitent un conteneur Docker)
-docker run --rm -d -p 2222:2222 \
-  -e USER_NAME=test -e USER_PASSWORD=test -e PASSWORD_ACCESS=true \
-  linuxserver/openssh-server
+The two SSH integration tests are ignored by default; they need an OpenSSH server in Docker:
+
+```bash
+docker run --rm -d -p 2222:2222 -e USER_NAME=test -e USER_PASSWORD=test -e PASSWORD_ACCESS=true linuxserver/openssh-server
 cd src-tauri && cargo test --all-features -- --ignored ssh
 ```
 
-## Licence
+User documentation (in French) is in [`docs/`](./docs/): getting started, SSH config import, keyboard shortcuts, synchronisation setup.
 
-**[Functional Source License 1.1 (FSL-1.1-MIT)](./LICENSE.md)** — *source-available*.
+## Status
 
-Concrètement :
-- ✅ Tu peux **lire, utiliser, modifier, redistribuer** le code librement, à
-  titre perso, en interne, pour l'éducation, la recherche.
-- ❌ Tu **ne peux pas** en faire un produit/service commercial concurrent (le
-  revendre tel quel comme une alternative payante).
-- 🔓 Chaque version **bascule automatiquement en licence MIT** au bout de 2 ans.
+- Version 1.0.5, released on 26 May 2026, with installers for the three platforms built by GitHub Actions.
+- 71 backend tests (unit and SQLite tests), of which 2 SSH integration tests are ignored by default. Continuous integration runs Clippy with warnings as errors and the test suite on Ubuntu, macOS and Windows, plus lint and build of the frontend.
+- Known limitations: the remote-wins strategy can discard concurrent edits made on two machines before either has pushed; installers are unsigned; the PIN does not encrypt local data.
 
-C'est le modèle de Sentry : transparence totale de l'open source, sans laisser
-quiconque commercialiser le projet à la place de ses auteurs. Si un jour le
-projet est abandonné, la clause MIT-après-2-ans garantit qu'il reste libre.
+## License
 
-## Soutenir
-
-Lynk Client est gratuit et le restera. Si l'app t'est utile, tu peux m'offrir
-un café ☕ — ça soutient le développement, sans pression.
-
-[![Offrir un café](https://img.shields.io/badge/Offrir%20un%20caf%C3%A9-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/mtseckdev)
+[Functional Source License 1.1, MIT Future License (FSL-1.1-MIT)](./LICENSE.md). The code can be read, used, modified and redistributed, including for education and research, but not to offer a competing commercial product. Each version becomes available under the MIT license two years after its release.
